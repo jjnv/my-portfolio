@@ -1,0 +1,86 @@
+---
+interface Props {
+  type: 'airflow-observer' | 'llm-eval-lab' | 'boundedscan';
+}
+
+const { type } = Astro.props;
+---
+
+<div class="diagram" aria-hidden="true">
+  {
+    type === 'airflow-observer' && (
+      <svg viewBox="0 0 620 280" role="presentation">
+        <defs>
+          <linearGradient id="flowGradient" x1="0" x2="1">
+            <stop offset="0" stop-color="var(--accent)" />
+            <stop offset="1" stop-color="var(--warm)" />
+          </linearGradient>
+        </defs>
+        <path class="diagram__grid" d="M0 70H620M0 140H620M0 210H620M155 0V280M310 0V280M465 0V280" />
+        <path class="diagram__flow" d="M78 140H542" />
+        <circle class="diagram__pulse" cx="310" cy="140" r="7" />
+        <g class="diagram__node">
+          <rect x="31" y="104" width="94" height="72" rx="4" />
+          <text x="78" y="135">AIRFLOW</text>
+          <text class="diagram__micro" x="78" y="154">REST API</text>
+        </g>
+        <g class="diagram__node diagram__node--accent">
+          <rect x="263" y="93" width="94" height="94" rx="47" />
+          <text x="310" y="135">INGEST</text>
+          <text class="diagram__micro" x="310" y="154">FASTAPI</text>
+        </g>
+        <g class="diagram__node">
+          <rect x="495" y="104" width="94" height="72" rx="4" />
+          <text x="542" y="135">SIGNALS</text>
+          <text class="diagram__micro" x="542" y="154">DASHBOARD</text>
+        </g>
+        <text class="diagram__label" x="31" y="247">COLLECT</text>
+        <text class="diagram__label" x="269" y="247">UNDERSTAND</text>
+        <text class="diagram__label" x="505" y="247">ACT</text>
+      </svg>
+    )
+  }
+  {
+    type === 'llm-eval-lab' && (
+      <svg viewBox="0 0 620 280" role="presentation">
+        <path class="diagram__grid" d="M0 70H620M0 140H620M0 210H620M155 0V280M310 0V280M465 0V280" />
+        <path class="diagram__curve" d="M48 207C126 192 151 110 216 123s79 72 139 41 84-102 139-80 48 91 78 104" />
+        <path class="diagram__curve diagram__curve--ghost" d="M48 185c61-20 113-11 169-44s82-51 139-29 85 80 216 36" />
+        {[48, 153, 257, 362, 467, 572].map((cx, index) => (
+          <circle class:list={['diagram__point', { 'diagram__point--hot': index === 3 }]} cx={cx} cy={index % 2 === 0 ? 207 - index * 17 : 176 - index * 11} r="6" />
+        ))}
+        <g class="diagram__metric">
+          <text x="47" y="46">EVAL / 0042</text>
+          <text class="diagram__metric-value" x="47" y="84">0.92</text>
+        </g>
+        <g class="diagram__legend">
+          <line x1="429" y1="44" x2="461" y2="44" />
+          <text x="470" y="48">candidate</text>
+          <line class="diagram__legend-ghost" x1="429" y1="66" x2="461" y2="66" />
+          <text x="470" y="70">baseline</text>
+        </g>
+        <text class="diagram__label" x="47" y="247">QUALITY · GROUNDING · LATENCY · COST</text>
+      </svg>
+    )
+  }
+  {
+    type === 'boundedscan' && (
+      <svg viewBox="0 0 620 280" role="presentation">
+        <path class="diagram__grid" d="M0 70H620M0 140H620M0 210H620M155 0V280M310 0V280M465 0V280" />
+        <circle class="diagram__scope" cx="310" cy="137" r="93" />
+        <circle class="diagram__scope diagram__scope--inner" cx="310" cy="137" r="57" />
+        <path class="diagram__radar" d="M310 137 373 83" />
+        <circle class="diagram__blip" cx="373" cy="83" r="8" />
+        <circle class="diagram__blip diagram__blip--small" cx="266" cy="179" r="5" />
+        <path class="diagram__bracket" d="M82 73H47v128h35M538 73h35v128h-35" />
+        <text class="diagram__side" x="31" y="229">AUTHORIZED</text>
+        <text class="diagram__side" x="506" y="229">BOUNDED</text>
+        <g class="diagram__status">
+          <circle cx="480" cy="39" r="4" />
+          <text x="492" y="43">SCOPE LOCKED</text>
+        </g>
+      </svg>
+    )
+  }
+</div>
+
