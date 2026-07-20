@@ -1,8 +1,22 @@
 import { expect, test, type Page } from '@playwright/test';
 
 const openDocumentOnMobile = async (page: Page) => {
-  if (await page.getByRole('button', { name: 'VIEW' }).isVisible()) {
-    await page.getByRole('button', { name: 'VIEW' }).click();
+  const portfolioButton = page.getByRole('button', { name: 'Portfolio' });
+  if (
+    (await portfolioButton.isVisible()) &&
+    (await portfolioButton.getAttribute('aria-pressed')) !== 'true'
+  ) {
+    await portfolioButton.click();
+  }
+};
+
+const openTerminalOnMobile = async (page: Page) => {
+  const terminalButton = page.getByRole('button', { name: 'Terminal' });
+  if (
+    (await terminalButton.isVisible()) &&
+    (await terminalButton.getAttribute('aria-pressed')) !== 'true'
+  ) {
+    await terminalButton.click();
   }
 };
 
@@ -41,6 +55,7 @@ test('renders the workstation and keeps all portfolio content available', async 
 
 test('terminal commands navigate the portfolio and update the URL', async ({ page }) => {
   await page.goto('/');
+  await openTerminalOnMobile(page);
 
   const input = page.getByLabel('Portfolio terminal command');
   await input.fill('open airflow-observer');
@@ -52,9 +67,7 @@ test('terminal commands navigate the portfolio and update the URL', async ({ pag
     'Opened ~/projects/airflow-observer/README.md'
   );
 
-  if (await page.getByRole('button', { name: 'TERM' }).isVisible()) {
-    await page.getByRole('button', { name: 'TERM' }).click();
-  }
+  await openTerminalOnMobile(page);
 
   await input.fill('not-a-command');
   await input.press('Enter');
@@ -65,6 +78,7 @@ test('terminal commands navigate the portfolio and update the URL', async ({ pag
 
 test('supports file commands, history and tab completion', async ({ page }) => {
   await page.goto('/');
+  await openTerminalOnMobile(page);
   const input = page.getByLabel('Portfolio terminal command');
 
   await input.fill('cd projects');
@@ -72,18 +86,14 @@ test('supports file commands, history and tab completion', async ({ page }) => {
   await expect(page.locator('[data-prompt]')).toHaveText('juanjo@portfolio:~/projects$');
   await expect(page.locator('[data-terminal-output]')).toContainText('airflow-observer/');
 
-  if (await page.getByRole('button', { name: 'TERM' }).isVisible()) {
-    await page.getByRole('button', { name: 'TERM' }).click();
-  }
+  await openTerminalOnMobile(page);
   await input.fill('who');
   await input.press('Tab');
   await expect(input).toHaveValue('whoami');
   await input.press('Enter');
   await expect(page).toHaveURL(/#about$/);
 
-  if (await page.getByRole('button', { name: 'TERM' }).isVisible()) {
-    await page.getByRole('button', { name: 'TERM' }).click();
-  }
+  await openTerminalOnMobile(page);
   await input.press('ArrowUp');
   await expect(input).toHaveValue('whoami');
 });
@@ -114,6 +124,46 @@ test('has no horizontal overflow and keeps private details out of the page', asy
   expect(dimensions.text).not.toContain('637932858');
   expect(dimensions.text).not.toContain('Download CV');
   expect(dimensions.text).not.toContain('CV_ENG.pdf');
+});
+
+test('mobile starts with the portfolio and exposes comfortable touch targets', async ({
+  page
+}, testInfo) => {
+  test.skip(testInfo.project.name !== 'mobile');
+  await page.goto('/');
+
+  const portfolioButton = page.getByRole('button', { name: 'Portfolio' });
+  const terminalButton = page.getByRole('button', { name: 'Terminal' });
+  await expect(portfolioButton).toHaveAttribute('aria-pressed', 'true');
+  await expect(terminalButton).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('#portfolio-panel')).toBeVisible();
+  await expect(page.locator('#terminal-panel')).toBeHidden();
+
+  const portfolioTargets = await page
+    .locator('.mobile-view-switcher button, .system-bar__identity, .document-actions a, .document-actions button')
+    .evaluateAll((elements) =>
+      elements.map((element) => {
+        const rect = element.getBoundingClientRect();
+        return { width: rect.width, height: rect.height };
+      })
+    );
+  expect(portfolioTargets.every(({ width, height }) => width >= 44 && height >= 44)).toBe(true);
+
+  await terminalButton.click();
+  await expect(terminalButton).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#terminal-panel')).toBeVisible();
+  await expect(page.locator('#portfolio-panel')).toBeHidden();
+  await expect(page.getByLabel('Portfolio terminal command')).not.toBeFocused();
+
+  const terminalTargets = await page
+    .locator('.mobile-view-switcher button, .quick-commands button, .terminal__line button, .terminal__form input')
+    .evaluateAll((elements) =>
+      elements.map((element) => {
+        const rect = element.getBoundingClientRect();
+        return { width: rect.width, height: rect.height };
+      })
+    );
+  expect(terminalTargets.every(({ width, height }) => width >= 44 && height >= 44)).toBe(true);
 });
 
 test('supports keyboard navigation and reduced motion', async ({ page }) => {

@@ -46,10 +46,6 @@ const projectPaths = {
         <i></i>
         <span>OPS WORKSTATION</span>
       </div>
-      <div class="system-bar__mobile" aria-label="Mobile workspace">
-        <button type="button" data-mobile-show="terminal">TERM</button>
-        <button type="button" data-mobile-show="document">VIEW</button>
-      </div>
       <div class="system-bar__status">
         <span class="availability"><i></i> AVAILABLE</span>
         <time data-clock>--:--</time>
@@ -57,7 +53,11 @@ const projectPaths = {
     </header>
 
     <main class="workstation" id="main-content">
-      <section class="terminal-window window" aria-labelledby="terminal-title">
+      <section
+        class="terminal-window window"
+        id="terminal-panel"
+        aria-labelledby="terminal-title"
+      >
         <div class="window__bar">
           <div class="window__controls" aria-hidden="true">
             <i></i><i></i><i></i>
@@ -119,7 +119,11 @@ const projectPaths = {
         </div>
       </section>
 
-      <section class="workspace-window window" aria-label="Portfolio file viewer">
+      <section
+        class="workspace-window window"
+        id="portfolio-panel"
+        aria-label="Portfolio file viewer"
+      >
         <div class="window__bar">
           <div class="window__controls" aria-hidden="true">
             <i></i><i></i><i></i>
@@ -556,12 +560,34 @@ const projectPaths = {
     </main>
 
     <footer class="system-footer">
-      <span><i></i> main*</span>
-      <span>Astro 7.1.1</span>
-      <span>UTF-8</span>
-      <span class="system-footer__path" data-footer-path>~/README.md</span>
-      <span>Ln 1, Col 1</span>
-      <span>© {new Date().getFullYear()} JN</span>
+      <div class="system-footer__desktop">
+        <span><i></i> main*</span>
+        <span>Astro 7.1.1</span>
+        <span>UTF-8</span>
+        <span class="system-footer__path" data-footer-path>~/README.md</span>
+        <span>Ln 1, Col 1</span>
+        <span>© {new Date().getFullYear()} JN</span>
+      </div>
+      <nav class="mobile-view-switcher" aria-label="Mobile workspace">
+        <button
+          type="button"
+          data-mobile-show="document"
+          aria-controls="portfolio-panel"
+          aria-pressed="true"
+        >
+          <span aria-hidden="true">▤</span>
+          Portfolio
+        </button>
+        <button
+          type="button"
+          data-mobile-show="terminal"
+          aria-controls="terminal-panel"
+          aria-pressed="false"
+        >
+          <span aria-hidden="true">&gt;_</span>
+          Terminal
+        </button>
+      </nav>
     </footer>
   </div>
 
@@ -721,6 +747,9 @@ const projectPaths = {
     const documentTab = document.querySelector<HTMLElement>('[data-document-tab]');
     const workspaceIndex = document.querySelector<HTMLElement>('[data-workspace-index]');
     const footerPath = document.querySelector<HTMLElement>('[data-footer-path]');
+    const mobilePanelButtons = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('[data-mobile-show]')
+    );
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
     let cwd = '~';
@@ -776,6 +805,13 @@ const projectPaths = {
       terminal.scrollTop = terminal.scrollHeight;
     };
 
+    const showMobilePanel = (panel: 'terminal' | 'document') => {
+      document.body.classList.toggle('mobile-terminal-open', panel === 'terminal');
+      mobilePanelButtons.forEach((button) => {
+        button.setAttribute('aria-pressed', String(button.dataset.mobileShow === panel));
+      });
+    };
+
     const openView = (view: ViewName, updateUrl = true, showOnMobile = true) => {
       const activeView = viewElements.find((element) => element.dataset.view === view);
       if (!activeView) return;
@@ -803,7 +839,7 @@ const projectPaths = {
 
       document.querySelector<HTMLElement>('[data-document-pane]')?.scrollTo({ top: 0 });
       if (showOnMobile && window.matchMedia('(max-width: 760px)').matches) {
-        document.body.classList.add('mobile-document-open');
+        showMobilePanel('document');
       }
     };
 
@@ -987,19 +1023,11 @@ const projectPaths = {
       if (view && viewToPath[view]) openView(view);
 
       const mobilePanel = target.closest<HTMLButtonElement>('[data-mobile-show]');
-      if (mobilePanel?.dataset.mobileShow) {
-        document.body.classList.toggle(
-          'mobile-document-open',
-          mobilePanel.dataset.mobileShow === 'document'
-        );
-        document
-          .querySelectorAll<HTMLElement>('[data-mobile-show]')
-          .forEach((button) =>
-            button.classList.toggle(
-              'is-active',
-              button.dataset.mobileShow === mobilePanel.dataset.mobileShow
-            )
-          );
+      if (
+        mobilePanel?.dataset.mobileShow === 'terminal' ||
+        mobilePanel?.dataset.mobileShow === 'document'
+      ) {
+        showMobilePanel(mobilePanel.dataset.mobileShow);
       }
     });
 
