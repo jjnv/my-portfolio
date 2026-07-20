@@ -1,6 +1,7 @@
 ---
 import ArrowIcon from '../components/ArrowIcon.astro';
 import ProjectDiagram from '../components/ProjectDiagram.astro';
+import WebsterGuide from '../components/WebsterGuide.astro';
 import BaseLayout from '../layouts/BaseLayout.astro';
 import { education, experience, profile, projects, skillGroups } from '../data/portfolio';
 
@@ -128,12 +129,30 @@ const projectPaths = {
           <div class="window__controls" aria-hidden="true">
             <i></i><i></i><i></i>
           </div>
+          <button
+            class="mobile-menu-toggle"
+            type="button"
+            data-mobile-menu-toggle
+            aria-controls="portfolio-menu"
+            aria-expanded="false"
+            aria-label="Open portfolio menu"
+          >
+            <span aria-hidden="true">☰</span>
+            Menu
+          </button>
           <span data-window-title>README.md — portfolio</span>
           <span class="window__meta" data-workspace-index>01 / HOME</span>
         </div>
 
         <div class="workspace">
-          <nav class="file-tree" aria-label="Portfolio files">
+          <button
+            class="mobile-menu-backdrop"
+            type="button"
+            data-mobile-menu-close
+            aria-label="Dismiss portfolio menu"
+            hidden
+          ></button>
+          <nav class="file-tree" id="portfolio-menu" aria-label="Portfolio files">
             <div class="file-tree__heading">
               <span>EXPLORER</span>
               <span>···</span>
@@ -589,20 +608,14 @@ const projectPaths = {
         </button>
       </nav>
     </footer>
+
+    <WebsterGuide />
   </div>
 
   <script>
-    type ViewName =
-      | 'home'
-      | 'about'
-      | 'projects'
-      | 'project-airflow-observer'
-      | 'project-llm-eval-lab'
-      | 'project-boundedscan'
-      | 'experience'
-      | 'stack'
-      | 'education'
-      | 'contact';
+    import type { WebsterView } from '../data/webster';
+
+    type ViewName = WebsterView;
 
     type FileEntry = {
       name: string;
@@ -747,9 +760,15 @@ const projectPaths = {
     const documentTab = document.querySelector<HTMLElement>('[data-document-tab]');
     const workspaceIndex = document.querySelector<HTMLElement>('[data-workspace-index]');
     const footerPath = document.querySelector<HTMLElement>('[data-footer-path]');
+    const portfolioPanel = document.querySelector<HTMLElement>('#portfolio-panel');
+    const portfolioMenu = document.querySelector<HTMLElement>('#portfolio-menu');
+    const mobileMenuToggle = document.querySelector<HTMLButtonElement>('[data-mobile-menu-toggle]');
+    const mobileMenuBackdrop =
+      document.querySelector<HTMLButtonElement>('[data-mobile-menu-close]');
     const mobilePanelButtons = Array.from(
       document.querySelectorAll<HTMLButtonElement>('[data-mobile-show]')
     );
+    const mobileViewport = window.matchMedia('(max-width: 760px)');
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
     let cwd = '~';
@@ -805,11 +824,33 @@ const projectPaths = {
       terminal.scrollTop = terminal.scrollHeight;
     };
 
+    const setMobileMenu = (open: boolean) => {
+      const isOpen = open && mobileViewport.matches;
+      portfolioPanel?.classList.toggle('mobile-menu-open', isOpen);
+      mobileMenuToggle?.setAttribute('aria-expanded', String(isOpen));
+      mobileMenuToggle?.setAttribute(
+        'aria-label',
+        isOpen ? 'Close portfolio menu' : 'Open portfolio menu'
+      );
+      if (mobileMenuBackdrop) mobileMenuBackdrop.hidden = !isOpen;
+
+      if (portfolioMenu) {
+        portfolioMenu.inert = mobileViewport.matches && !isOpen;
+        if (mobileViewport.matches) {
+          portfolioMenu.setAttribute('aria-hidden', String(!isOpen));
+        } else {
+          portfolioMenu.removeAttribute('aria-hidden');
+        }
+      }
+    };
+
     const showMobilePanel = (panel: 'terminal' | 'document') => {
+      setMobileMenu(false);
       document.body.classList.toggle('mobile-terminal-open', panel === 'terminal');
       mobilePanelButtons.forEach((button) => {
         button.setAttribute('aria-pressed', String(button.dataset.mobileShow === panel));
       });
+      window.dispatchEvent(new CustomEvent('portfolio:panel-change', { detail: { panel } }));
     };
 
     const openView = (view: ViewName, updateUrl = true, showOnMobile = true) => {
@@ -841,6 +882,7 @@ const projectPaths = {
       if (showOnMobile && window.matchMedia('(max-width: 760px)').matches) {
         showMobilePanel('document');
       }
+      window.dispatchEvent(new CustomEvent('portfolio:view-change', { detail: { view } }));
     };
 
     const openPath = (path: string) => {
@@ -892,8 +934,10 @@ const projectPaths = {
       const [nameRaw = '', ...args] = command.split(/\s+/);
       const name = nameRaw.toLowerCase();
       const argument = args.join(' ');
+      let outcome: 'success' | 'error' | 'help' = 'success';
 
       if (name === 'help' || name === 'man') {
+        outcome = 'help';
         printHelp();
       } else if (name === 'whoami') {
         appendLine('juanjo — Data Engineer · Barcelona, Spain', 'terminal__line terminal__success');
@@ -924,6 +968,7 @@ const projectPaths = {
           if (view) openView(view);
           printDirectory(target);
         } else {
+          outcome = 'error';
           appendLine(`cd: ${argument}: No such directory`, 'terminal__line terminal__error');
         }
       } else if (name === 'cat') {
@@ -931,6 +976,7 @@ const projectPaths = {
         if (openPath(target)) {
           appendLine(`Opened ${target}`, 'terminal__line terminal__success');
         } else {
+          outcome = 'error';
           appendLine(`cat: ${argument}: No such file`, 'terminal__line terminal__error');
         }
       } else if (name === 'open') {
@@ -940,6 +986,7 @@ const projectPaths = {
           openView(view);
           appendLine(`Opened ${viewToPath[view]}`, 'terminal__line terminal__success');
         } else {
+          outcome = 'error';
           appendLine(
             `open: '${argument}' not found. Try: open projects`,
             'terminal__line terminal__error'
@@ -952,12 +999,16 @@ const projectPaths = {
       } else if (name === 'clear') {
         if (terminalOutput) terminalOutput.innerHTML = '';
       } else {
+        outcome = 'error';
         appendLine(
           `${name}: command not found. Type 'help' for available commands.`,
           'terminal__line terminal__error'
         );
       }
       scrollTerminal();
+      window.dispatchEvent(
+        new CustomEvent('portfolio:terminal-result', { detail: { outcome, command: name } })
+      );
     };
 
     terminalForm?.addEventListener('submit', (event) => {
@@ -1002,6 +1053,18 @@ const projectPaths = {
 
     document.addEventListener('click', (event) => {
       const target = event.target as HTMLElement;
+      const menuToggle = target.closest<HTMLButtonElement>('[data-mobile-menu-toggle]');
+      if (menuToggle) {
+        setMobileMenu(menuToggle.getAttribute('aria-expanded') !== 'true');
+        return;
+      }
+
+      if (target.closest('[data-mobile-menu-close]')) {
+        setMobileMenu(false);
+        mobileMenuToggle?.focus();
+        return;
+      }
+
       const commandButton = target.closest<HTMLButtonElement>('[data-command]');
       if (commandButton?.dataset.command) {
         runCommand(commandButton.dataset.command);
@@ -1015,6 +1078,7 @@ const projectPaths = {
           ? `cd ${pathButton.dataset.path}`
           : `cat ${pathButton.dataset.path}`;
         runCommand(command);
+        setMobileMenu(false);
         return;
       }
 
@@ -1031,6 +1095,20 @@ const projectPaths = {
       }
     });
 
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && portfolioPanel?.classList.contains('mobile-menu-open')) {
+        setMobileMenu(false);
+        mobileMenuToggle?.focus();
+      }
+    });
+
+    mobileViewport.addEventListener('change', () => setMobileMenu(false));
+
+    window.addEventListener('webster:navigate', (event) => {
+      const view = (event as CustomEvent<{ view?: ViewName }>).detail?.view;
+      if (view && viewToPath[view]) openView(view);
+    });
+
     window.addEventListener('popstate', () => {
       const requestedView = location.hash.slice(1) as ViewName;
       openView(viewToPath[requestedView] ? requestedView : 'home', false);
@@ -1038,6 +1116,7 @@ const projectPaths = {
 
     const initialView = location.hash.slice(1) as ViewName;
     openView(viewToPath[initialView] ? initialView : 'home', false, Boolean(initialView));
+    setMobileMenu(false);
     setPrompt();
 
     const clock = document.querySelector<HTMLTimeElement>('[data-clock]');

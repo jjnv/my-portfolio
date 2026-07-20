@@ -1,0 +1,659 @@
+---
+import { websterGreeting, websterHints, websterTerminalHint } from '../data/webster';
+---
+
+<aside class="webster-guide" data-webster aria-label="Webster, portfolio guide">
+  <section class="webster-guide__bubble" data-webster-bubble hidden>
+    <header class="webster-guide__header">
+      <span><i></i> webster.service</span>
+      <div>
+        <button
+          type="button"
+          data-webster-mute
+          aria-pressed="false"
+          aria-label="Mute automatic tips from Webster"
+        >MUTE</button>
+        <button type="button" data-webster-minimize aria-label="Minimize Webster">MIN</button>
+        <button type="button" data-webster-close aria-label="Close Webster's message">×</button>
+      </div>
+    </header>
+    <p data-webster-message aria-live="polite"></p>
+    <button class="webster-guide__action" type="button" data-webster-action hidden></button>
+  </section>
+
+  <button
+    class="webster-guide__pet"
+    type="button"
+    data-webster-pet
+    aria-label="Ask Webster for a hint"
+  >
+    <span class="webster-guide__sprite" data-webster-sprite aria-hidden="true">
+      <img
+        src="/mascots/webster/spritesheet.webp"
+        alt=""
+        width="1536"
+        height="1872"
+        decoding="async"
+      />
+    </span>
+    <span class="webster-guide__name" aria-hidden="true">WEBSTER</span>
+  </button>
+</aside>
+
+<button
+  class="webster-guide__restore"
+  type="button"
+  data-webster-restore
+  aria-label="Restore Webster"
+  hidden
+>
+  <span aria-hidden="true">W8</span>
+</button>
+
+<script is:inline define:vars={{ websterGreeting, websterHints, websterTerminalHint }}>
+  const root = document.querySelector('[data-webster]');
+  const bubble = root?.querySelector('[data-webster-bubble]');
+  const message = root?.querySelector('[data-webster-message]');
+  const actionButton = root?.querySelector('[data-webster-action]');
+  const petButton = root?.querySelector('[data-webster-pet]');
+  const sprite = root?.querySelector('[data-webster-sprite]');
+  const spriteImage = sprite?.querySelector('img');
+  const muteButton = root?.querySelector('[data-webster-mute]');
+  const minimizeButton = root?.querySelector('[data-webster-minimize]');
+  const closeButton = root?.querySelector('[data-webster-close]');
+  const restoreButton = document.querySelector('[data-webster-restore]');
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+  const preferenceKey = 'jn-os-webster-preferences';
+  const sessionKey = 'jn-os-webster-session';
+  const animationRows = {
+    idle: { row: 0, durations: [280, 110, 110, 140, 140, 320] },
+    'running-right': { row: 1, durations: [120, 120, 120, 120, 120, 120, 120, 220] },
+    'running-left': { row: 2, durations: [120, 120, 120, 120, 120, 120, 120, 220] },
+    waving: { row: 3, durations: [140, 140, 140, 280] },
+    jumping: { row: 4, durations: [140, 140, 140, 140, 280] },
+    failed: { row: 5, durations: [140, 140, 140, 140, 140, 140, 140, 240] },
+    waiting: { row: 6, durations: [150, 150, 150, 150, 150, 260] },
+    running: { row: 7, durations: [120, 120, 120, 120, 120, 220] },
+    review: { row: 8, durations: [150, 150, 150, 150, 150, 280] }
+  };
+
+  const readStorage = (storage, key, fallback) => {
+    try {
+      const value = JSON.parse(storage.getItem(key) ?? 'null');
+      return value && typeof value === 'object' ? { ...fallback, ...value } : fallback;
+    } catch {
+      return fallback;
+    }
+  };
+
+  let preferences = readStorage(localStorage, preferenceKey, {
+    muted: false,
+    minimized: false
+  });
+  let session = readStorage(sessionStorage, sessionKey, {
+    greeted: false,
+    terminalSeen: false
+  });
+  let currentView = Object.hasOwn(websterHints, location.hash.slice(1))
+    ? location.hash.slice(1)
+    : 'home';
+  let currentAction = null;
+  let bubbleTimer;
+  let animationTimer;
+  let messageDelayTimer;
+  let roamTimer;
+  let activityTimer;
+  let pendingViewHint = currentView;
+  let interfaceReady = false;
+  let lastAutoView = '';
+  let lastAutoMessageAt = 0;
+  let lastTerminalHintAt = 0;
+  let roamIndex = 0;
+  let roamPosition = { x: 0, y: 0 };
+  let activityStep = 0;
+
+  const persistPreferences = () => {
+    try {
+      localStorage.setItem(preferenceKey, JSON.stringify(preferences));
+    } catch {}
+  };
+
+  const persistSession = () => {
+    try {
+      sessionStorage.setItem(sessionKey, JSON.stringify(session));
+    } catch {}
+  };
+
+  const setFrame = (row, frame) => {
+    if (!spriteImage) return;
+    spriteImage.style.transform = `translate(${-12.5 * frame}%, ${-(100 / 9) * row}%)`;
+  };
+
+  const playState = (state, loop = false) => {
+    if (!sprite || !animationRows[state]) return;
+    window.clearTimeout(animationTimer);
+    sprite.dataset.state = state;
+    if (reduceMotion.matches) {
+      setFrame(0, 0);
+      sprite.dataset.state = 'idle';
+      return;
+    }
+
+    const animation = animationRows[state];
+    let frame = 0;
+    const advance = () => {
+      setFrame(animation.row, frame);
+      animationTimer = window.setTimeout(() => {
+        frame += 1;
+        if (frame < animation.durations.length) {
+          advance();
+        } else if (loop) {
+          frame = 0;
+          advance();
+        } else {
+          playState('idle', true);
+        }
+      }, animation.durations[frame]);
+    };
+    advance();
+  };
+
+  const closeBubble = () => {
+    window.clearTimeout(bubbleTimer);
+    if (bubble) bubble.hidden = true;
+    root?.removeAttribute('data-speaking');
+  };
+
+  const showBubble = (hint, automatic = true) => {
+    if (!bubble || !message || !hint || preferences.minimized) return false;
+    if (automatic && preferences.muted) return false;
+    window.clearTimeout(bubbleTimer);
+    message.textContent = hint.message;
+    currentAction = hint.action ?? null;
+    if (actionButton) {
+      actionButton.hidden = !currentAction;
+      actionButton.textContent = currentAction?.label ?? '';
+      if (currentAction) actionButton.setAttribute('aria-label', currentAction.label);
+      else actionButton.removeAttribute('aria-label');
+    }
+    roamIndex = 0;
+    roamPosition = { x: 0, y: 0 };
+    root?.style.setProperty('--webster-roam-x', '0px');
+    root?.style.setProperty('--webster-roam-y', '0px');
+    window.clearTimeout(roamTimer);
+    if (root) {
+      root.dataset.roamIndex = '0';
+      root.removeAttribute('data-roaming');
+    }
+    bubble.hidden = false;
+    root?.setAttribute('data-speaking', '');
+    if (automatic) lastAutoMessageAt = Date.now();
+    bubbleTimer = window.setTimeout(closeBubble, 8000);
+    return true;
+  };
+
+  const contextualHint = (view = currentView) => websterHints[view] ?? websterHints.home;
+
+  const queueViewHint = (view, delay = 650) => {
+    if (!Object.hasOwn(websterHints, view)) return;
+    pendingViewHint = view;
+    window.clearTimeout(messageDelayTimer);
+    if (!interfaceReady || preferences.minimized || preferences.muted) return;
+    if (view === lastAutoView && Date.now() - lastAutoMessageAt < 6000) return;
+
+    const hint = contextualHint(view);
+    messageDelayTimer = window.setTimeout(() => {
+      if (pendingViewHint !== view) return;
+      if (showBubble(hint)) {
+        lastAutoView = view;
+        pendingViewHint = null;
+      }
+    }, reduceMotion.matches ? 0 : delay);
+  };
+
+  const setMinimized = (minimized) => {
+    preferences.minimized = minimized;
+    persistPreferences();
+    root?.toggleAttribute('hidden', minimized);
+    if (restoreButton) restoreButton.hidden = !minimized;
+    if (minimized) {
+      closeBubble();
+      window.clearTimeout(activityTimer);
+    } else {
+      playState('waving');
+      scheduleActivity(5000);
+    }
+  };
+
+  const syncMuteControl = () => {
+    if (!muteButton) return;
+    muteButton.setAttribute('aria-pressed', String(preferences.muted));
+    muteButton.setAttribute(
+      'aria-label',
+      preferences.muted ? 'Enable automatic tips from Webster' : 'Mute automatic tips from Webster'
+    );
+    muteButton.textContent = preferences.muted ? 'UNMUTE' : 'MUTE';
+  };
+
+  const getRoamPoints = () => {
+    if (window.innerWidth <= 760) {
+      return [
+        { x: 0, y: 0 },
+        { x: -Math.min(window.innerWidth * 0.18, 64), y: 0 },
+        { x: -Math.min(window.innerWidth * 0.08, 32), y: -Math.min(window.innerHeight * 0.12, 84) },
+        { x: 0, y: -Math.min(window.innerHeight * 0.2, 132) }
+      ];
+    }
+    return [
+      { x: 0, y: 0 },
+      { x: -Math.min(window.innerWidth * 0.16, 220), y: 0 },
+      { x: -Math.min(window.innerWidth * 0.08, 120), y: -Math.min(window.innerHeight * 0.14, 120) },
+      { x: 0, y: -Math.min(window.innerHeight * 0.3, 240) },
+      { x: -Math.min(window.innerWidth * 0.2, 280), y: -Math.min(window.innerHeight * 0.2, 170) }
+    ];
+  };
+
+  const roam = () => {
+    if (!root || reduceMotion.matches || preferences.minimized) return;
+    const points = getRoamPoints();
+    roamIndex = (roamIndex + 1) % points.length;
+    const nextPosition = points[roamIndex];
+    const horizontalDelta = nextPosition.x - roamPosition.x;
+    roamPosition = nextPosition;
+    root.style.setProperty('--webster-roam-x', `${nextPosition.x}px`);
+    root.style.setProperty('--webster-roam-y', `${nextPosition.y}px`);
+    root.dataset.roamIndex = String(roamIndex);
+    root.setAttribute('data-roaming', '');
+    if (horizontalDelta > 8) playState('running-right');
+    else if (horizontalDelta < -8) playState('running-left');
+    else playState('running');
+    window.clearTimeout(roamTimer);
+    roamTimer = window.setTimeout(() => {
+      root.removeAttribute('data-roaming');
+      playState('waiting', true);
+    }, 1150);
+  };
+
+  const scheduleActivity = (delay) => {
+    window.clearTimeout(activityTimer);
+    if (reduceMotion.matches || preferences.minimized) return;
+    const intervals = [9000, 12000, 10500, 13500];
+    const nextDelay = delay ?? intervals[activityStep % intervals.length];
+    activityTimer = window.setTimeout(() => {
+      if (
+        document.hidden ||
+        !bubble?.hidden ||
+        document.activeElement?.closest('[data-terminal-form]')
+      ) {
+        scheduleActivity(bubble?.hidden ? 5000 : 3000);
+        return;
+      }
+      roam();
+      activityStep += 1;
+      if (
+        bubble?.hidden &&
+        !preferences.muted &&
+        Date.now() - lastAutoMessageAt > 22000 &&
+        activityStep % 2 === 0
+      ) {
+        window.setTimeout(() => showBubble(contextualHint()), 1250);
+      }
+      scheduleActivity();
+    }, nextDelay);
+  };
+
+  const startWebster = () => {
+    interfaceReady = true;
+    if (preferences.minimized) return;
+    if (!session.greeted) {
+      session.greeted = true;
+      persistSession();
+      playState('waving');
+      showBubble({ message: websterGreeting });
+      const queuedView = pendingViewHint ?? currentView;
+      window.clearTimeout(messageDelayTimer);
+      messageDelayTimer = window.setTimeout(
+        () => queueViewHint(queuedView, 0),
+        reduceMotion.matches ? 350 : 4200
+      );
+    } else {
+      queueViewHint(pendingViewHint ?? currentView, 450);
+    }
+    scheduleActivity(7000);
+  };
+
+  const waitForBoot = () => {
+    if (!document.querySelector('[data-boot]')) {
+      window.setTimeout(startWebster, 350);
+      return;
+    }
+    const observer = new MutationObserver(() => {
+      if (!document.querySelector('[data-boot]')) {
+        observer.disconnect();
+        window.setTimeout(startWebster, 350);
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+  };
+
+  petButton?.addEventListener('click', () => {
+    playState('review');
+    showBubble(contextualHint(currentView), false);
+  });
+  petButton?.addEventListener('mouseenter', () => {
+    if (!reduceMotion.matches) playState('waving');
+  });
+  closeButton?.addEventListener('click', closeBubble);
+  muteButton?.addEventListener('click', () => {
+    preferences.muted = !preferences.muted;
+    persistPreferences();
+    syncMuteControl();
+    if (preferences.muted) {
+      closeBubble();
+      petButton?.focus();
+    } else {
+      queueViewHint(currentView, 250);
+    }
+  });
+  minimizeButton?.addEventListener('click', () => {
+    setMinimized(true);
+    restoreButton?.focus();
+  });
+  restoreButton?.addEventListener('click', () => {
+    setMinimized(false);
+    petButton?.focus();
+    queueViewHint(currentView, 500);
+  });
+  actionButton?.addEventListener('click', () => {
+    if (!currentAction) return;
+    window.dispatchEvent(
+      new CustomEvent('webster:navigate', { detail: { view: currentAction.view } })
+    );
+    closeBubble();
+  });
+
+  window.addEventListener('portfolio:view-change', (event) => {
+    const nextView = event.detail?.view;
+    if (!Object.hasOwn(websterHints, nextView)) return;
+    currentView = nextView;
+    roam();
+    queueViewHint(nextView);
+    scheduleActivity();
+  });
+
+  window.addEventListener('portfolio:terminal-result', (event) => {
+    const outcome = event.detail?.outcome;
+    if (outcome === 'error') {
+      window.clearTimeout(messageDelayTimer);
+      playState('failed');
+      showBubble({ message: "That command didn't resolve. Type `help` to list what I understand." });
+    } else if (outcome === 'help') {
+      window.clearTimeout(messageDelayTimer);
+      playState('waving');
+      showBubble({ message: websterTerminalHint });
+    } else {
+      playState('jumping');
+    }
+    scheduleActivity();
+  });
+
+  window.addEventListener('portfolio:panel-change', (event) => {
+    if (
+      event.detail?.panel !== 'terminal' ||
+      Date.now() - lastTerminalHintAt < 12000
+    ) return;
+    lastTerminalHintAt = Date.now();
+    session.terminalSeen = true;
+    persistSession();
+    playState('waving');
+    showBubble({ message: websterTerminalHint });
+    scheduleActivity();
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && bubble && !bubble.hidden) closeBubble();
+  });
+  reduceMotion.addEventListener('change', () => {
+    root?.style.removeProperty('--webster-roam-x');
+    root?.style.removeProperty('--webster-roam-y');
+    roamPosition = { x: 0, y: 0 };
+    playState('idle', true);
+    scheduleActivity();
+  });
+  window.addEventListener('resize', () => {
+    if (!reduceMotion.matches) roam();
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) scheduleActivity(3000);
+  });
+
+  root?.setAttribute('data-ready', '');
+  restoreButton?.setAttribute('data-ready', '');
+  syncMuteControl();
+  setMinimized(Boolean(preferences.minimized));
+  playState('idle', true);
+  waitForBoot();
+</script>
+
+<style>
+  .webster-guide,
+  .webster-guide__restore {
+    position: fixed;
+    z-index: 18;
+    right: clamp(0.7rem, 1.5vw, 1.25rem);
+    bottom: calc(var(--footer-bar) + 0.7rem);
+    font-family: var(--font-mono);
+  }
+
+  .webster-guide:not([data-ready]),
+  .webster-guide__restore:not([data-ready]) {
+    display: none;
+  }
+
+  .webster-guide {
+    transform: translate(
+      var(--webster-roam-x, 0),
+      var(--webster-roam-y, 0)
+    );
+    transition: transform 1.1s steps(10, end);
+    will-change: transform;
+  }
+
+  .webster-guide__bubble {
+    position: absolute;
+    right: 0;
+    bottom: 5.25rem;
+    width: min(21rem, calc(100vw - 1.4rem));
+    padding: 0.75rem;
+    color: var(--ink-dim);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+    background: rgba(18, 16, 16, 0.98);
+    box-shadow: 0 1rem 2.5rem rgba(0, 0, 0, 0.38);
+  }
+
+  .webster-guide__bubble[hidden],
+  .webster-guide__restore[hidden] {
+    display: none;
+  }
+
+  .webster-guide__bubble::after {
+    position: absolute;
+    right: 1.5rem;
+    bottom: -0.4rem;
+    width: 0.7rem;
+    height: 0.7rem;
+    border-right: 1px solid var(--line-strong);
+    border-bottom: 1px solid var(--line-strong);
+    background: var(--panel);
+    content: '';
+    transform: rotate(45deg);
+  }
+
+  .webster-guide__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding-bottom: 0.45rem;
+    color: var(--ink-faint);
+    border-bottom: 1px solid var(--line);
+    font-size: 0.54rem;
+    letter-spacing: 0.05em;
+  }
+
+  .webster-guide__header > span {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+
+  .webster-guide__header i {
+    display: block;
+    width: 0.4rem;
+    height: 0.4rem;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0.6rem rgba(209, 73, 79, 0.5);
+  }
+
+  .webster-guide__header div {
+    display: flex;
+    align-items: center;
+  }
+
+  .webster-guide__header button {
+    min-width: 2.4rem;
+    min-height: 1.75rem;
+    padding-inline: 0.35rem;
+    color: var(--ink-faint);
+    cursor: pointer;
+    font-size: 0.5rem;
+  }
+
+  .webster-guide__header button:hover,
+  .webster-guide__header button[aria-pressed='true'] {
+    color: var(--accent-strong);
+  }
+
+  .webster-guide__bubble p {
+    margin: 0;
+    padding: 0.7rem 0 0.2rem;
+    font-size: 0.7rem;
+    line-height: 1.55;
+  }
+
+  .webster-guide__action {
+    min-height: 2rem;
+    padding: 0.35rem 0;
+    color: var(--accent-strong);
+    cursor: pointer;
+    font-size: 0.62rem;
+  }
+
+  .webster-guide__action::before {
+    content: '> ';
+  }
+
+  .webster-guide__pet {
+    display: grid;
+    width: 4.75rem;
+    min-height: 4.75rem;
+    margin-left: auto;
+    color: var(--ink-faint);
+    cursor: pointer;
+    filter: drop-shadow(0 0.6rem 0.7rem rgba(0, 0, 0, 0.42));
+    place-items: center;
+  }
+
+  .webster-guide__pet:hover {
+    color: var(--accent-strong);
+  }
+
+  .webster-guide__sprite {
+    display: block;
+    position: relative;
+    width: 4rem;
+    height: 4.333rem;
+    overflow: hidden;
+  }
+
+  .webster-guide__sprite img {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 800%;
+    max-width: none;
+    height: 900%;
+    image-rendering: pixelated;
+    pointer-events: none;
+    transform-origin: top left;
+  }
+
+  .webster-guide__name {
+    margin-top: -0.2rem;
+    font-size: 0.48rem;
+    letter-spacing: 0.08em;
+  }
+
+  .webster-guide__restore {
+    display: grid;
+    width: 2.75rem;
+    height: 2.75rem;
+    color: var(--void);
+    border: 1px solid var(--accent);
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+    box-shadow: 0 0.6rem 1.5rem rgba(0, 0, 0, 0.35);
+    font-size: 0.6rem;
+    font-weight: 800;
+    place-items: center;
+  }
+
+  @media (max-width: 760px) {
+    .webster-guide,
+    .webster-guide__restore {
+      right: 0.7rem;
+      bottom: calc(var(--footer-bar) + 0.45rem);
+    }
+
+    .webster-guide__header button {
+      min-width: 2.75rem;
+      min-height: 2.75rem;
+    }
+
+    .webster-guide__bubble {
+      bottom: 4.8rem;
+    }
+
+    .webster-guide__pet {
+      width: 4.4rem;
+      min-height: 4.4rem;
+    }
+
+    .webster-guide__sprite {
+      width: 3.6rem;
+      height: 3.9rem;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .webster-guide {
+      transform: none !important;
+      transition: none !important;
+    }
+
+    .webster-guide__pet {
+      animation: none !important;
+    }
+  }
+
+  @media print {
+    .webster-guide,
+    .webster-guide__restore {
+      display: none !important;
+    }
+  }
+</style>

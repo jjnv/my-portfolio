@@ -9,6 +9,7 @@ production reliability and open-source systems.
 - Locally hosted Manrope and JetBrains Mono variable fonts
 - Hand-authored CSS and inline SVG diagrams
 - Interactive terminal with filesystem navigation, command history and tab completion
+- Webster, a contextual pixel-art spider guide with persistent mute and minimize controls
 - URL-addressable documents inside a responsive tiling-window interface
 - Session-aware boot sequence and mobile terminal/document switching
 - Playwright browser tests
